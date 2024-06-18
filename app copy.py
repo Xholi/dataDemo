@@ -4,12 +4,14 @@ import re
 import numbers
 from datetime import datetime
 import plotly.graph_objects as go
+import plotly.express as px
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import pyodbc
+import tempfile as tmp
 
 # Function definitions
 def validate_column_type(df, column_name, expected_type):
@@ -37,20 +39,21 @@ def calculate_completeness(data):
     for index, row in data.iterrows():
         property_value = row['PROPERTY_VALUE']
         property_uom = row['PROPERTY_UOM']
-        data_type_rules = row['VALUE_TYPE_RULES']
-        
+        data_type_rules = row['DATA_TYPE']
+
         if pd.api.types.is_numeric_dtype(property_value) and pd.notnull(property_uom) and data_type_rules == 'NUMERIC':
             complete_entries += 1
         elif pd.api.types.is_string_dtype(property_value) and pd.isnull(property_uom) and data_type_rules == 'STRING':
             complete_entries += 1
-    
+
     completeness = (complete_entries / len(data)) * 100 if len(data) > 0 else 0
     return completeness
 
+
 # Function to send email with attachment
 def send_email(to_email, subject, body, attachment_path):
-    from_email = "MantshXS@eskom.co.za"  # Replace with your email
-    from_password = "fancy=Koala1918"  # Replace with your email password
+    from_email = "MantshXS@eskom.co.za" # Replace with your email
+    from_password = "fancy=Koala1918" # Replace with your email password
 
     msg = MIMEMultipart()
     msg['From'] = from_email
@@ -80,8 +83,10 @@ st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to", ['Changes', 'Creations'])
 
 if page == 'Changes':
+    st.title("GX Master Data Quality Tool")
     st.title("Changes")
 else:
+    st.title("GX Master Data Quality Tool")
     st.title("Creations")
 
 # Sidebar for file upload or SQL connection
@@ -113,20 +118,17 @@ else:
 validation_checks = {
     "CORP_NO_type_check": (validate_column_type, 'CORP_NO', int),
     "ERP_NO_type_check": (validate_column_type, 'ERP_NUMBER', int),
-    "DESCR_type_check": (validate_column_type, 'DESCRIPTOR_TERM', str),
+    "DESCR_type_check": (validate_column_type, 'DESCRIPTOR', str),
     "PROPERTY_TERM_type_check": (validate_column_type, 'PROPERTY_TERM', str),
     "PROPERTY_VALUE_check": (lambda df, column, regex: df[column].apply(lambda x: isinstance(x, numbers.Number) or isinstance(x, str)), 'PROPERTY_VALUE', None),
-    "POD_check": (validate_column_regex, 'POD', '^[a-zA-Z\\s]*$|^NULL$'),
-    "PROP_FFT_check": (validate_column_regex, 'PROP_FFT', '^[a-zA-Z\\s]*$|^NULL$'),
+    "POD_check": (validate_column_regex, 'PURCHASE_ORDER_DESCRIPTION', '^[a-zA-Z\s]$|^NULL$'),
+    "PROP_FFT_check": (validate_column_regex, 'PROP_FFT', '^[a-zA-Z\s]$|^NULL$'),
     "PROPERTY_UOM_type_check": (validate_column_type, 'PROPERTY_UOM', str),
-    "UOM_RULES_type_check": (validate_column_type, 'UOM_RULES', str),
-    "VALUE_TYPE_RULES_check": (validate_column_type, 'VALUE_TYPE_RULES', str),
+    # "VALUE_TYPE_RULES_check": (validate_column_type, 'VALUE_TYPE_RULES', str),
     "DATA_TYPE_type_check": (validate_column_type, 'DATA_TYPE', str),
-    "ORIGINATING_PLANT_TRM_type_check": (validate_column_type, 'ORIGINATING_PLANT_TRM', str),
+    "ORIGINATING_PLANT_TRM_type_check": (validate_column_type, 'PLANT_NAME', str),
     "ORIGINATING_DIVISION_type_check": (validate_column_type, 'ORIGINATING_DIVISION', str),
     "PLANT_GROUP_type_check": (validate_column_type, 'PLANT_GROUP', str),
-    "MAND_IND_set_check": (validate_column_values_in_set, 'MAND_IND', {'Y', 'N'}),
-    "MAND_EMPTY_check": (validate_column_regex, 'MAND_EMPTY', '^[a-zA-Z\\s]*$|^NULL$'),
 }
 
 validation_results = {}
@@ -143,7 +145,7 @@ passed_percentage = {check: (count / total_rows) * 100 for check, count in passe
 failed_percentage = {check: (count / total_rows) * 100 for check, count in failed_counts.items()}
 
 total_validation_percentage = calculate_total_validation_percentage(validation_results)
-pod_duplication_percentage = calculate_duplication_percentage(df, 'POD')
+pod_duplication_percentage = calculate_duplication_percentage(df, 'PURCHASE_ORDER_DESCRIPTION')
 completeness_percentage = calculate_completeness(df)
 
 # Collect failed data points for each validation check
@@ -175,7 +177,7 @@ with col1:
     fig_gauge_validation.update_layout(width=300, height=300)
     st.plotly_chart(fig_gauge_validation)
 
-st.markdown("<br>", unsafe_allow_html=True)  # Add space between gauges
+    st.markdown("<br>", unsafe_allow_html=True) # Add space between gauges
 
 with col2:
     fig_gauge_pod = go.Figure(go.Indicator(
@@ -187,8 +189,8 @@ with col2:
     fig_gauge_pod.update_layout(width=300, height=300)
     st.plotly_chart(fig_gauge_pod)
 
-st.markdown("<br>", unsafe_allow_html=True)  # Add space between gauges
-# st.markdown("<br>", unsafe_allow_html=True) 
+    st.markdown("<br>", unsafe_allow_html=True) # Add space between gauges
+
 with col3:
     fig_gauge_completeness = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -199,22 +201,7 @@ with col3:
     fig_gauge_completeness.update_layout(width=300, height=300)
     st.plotly_chart(fig_gauge_completeness)
 
-# Show validation results as tables
-st.header("Validation Results")
 
-# st.subheader("Passed Validation Checks")
-passed_df = pd.DataFrame({
-    "Validation Check": list(passed_percentage.keys()),
-    "Passed Percentage": list(passed_percentage.values())
-})
-# st.dataframe(passed_df)
-
-# st.subheader("Failed Validation Checks")
-failed_df = pd.DataFrame({
-    "Validation Check": list(failed_percentage.keys()),
-    "Failed Percentage": list(failed_percentage.values())
-})
-# st.dataframe(failed_df)
 
 # Bar Chart of Validation Results
 labels = list(passed_percentage.keys())
@@ -240,11 +227,67 @@ fig_validation.add_trace(go.Bar(
 fig_validation.update_layout(barmode='stack', title="Validation Results", xaxis_title="Percentage", yaxis_title="Validation Check")
 st.plotly_chart(fig_validation)
 
+# Show validation results as tables
+st.header("Validation Results")
+st.write("Number of Items Processed :",total_rows)
+st.subheader("Passed Validation Checks")
+passed_df = pd.DataFrame({
+    "Validation Check": list(passed_percentage.keys()),
+    "Passed Percentage": list(passed_percentage.values())
+})
+st.write("Valid Data count : ", len(valid_data_points))
+st.dataframe(valid_data_points)
+st.subheader("Failed Validation Checks")
+failed_df = pd.DataFrame({
+    "Validation Check": list(failed_percentage.keys()),
+    "Failed Percentage": list(failed_percentage.values())
+})
+
+st.dataframe(failed_data_points)
+st.write("Invalid Data count : ", len(failed_data_points))
+# New visual: Number of failed vs passed values by day, week, month
+st.header("Failed vs Passed Over Time")
+df['CREATE_DATE'] = pd.to_datetime(df['CREATE_DATE'], format='%Y-%m-%d %H:%M:%S.%f', errors='coerce')
+df['CREATE_DAY'] = df['CREATE_DATE'].dt.date
+df['CREATE_WEEK'] = df['CREATE_DATE'].dt.to_period('W')
+df['CREATE_MONTH'] = df['CREATE_DATE'].dt.to_period('M')
+
+timeframes = {
+    'Day': 'CREATE_DAY',
+    'Week': 'CREATE_WEEK',
+    'Month': 'CREATE_MONTH'
+}
+
+timeframe = st.selectbox('Select Timeframe', list(timeframes.keys()))
+
+failed_vs_passed = df.copy()
+for check, result in validation_results.items():
+    failed_vs_passed[check] = result
+
+failed_vs_passed['Total_Failed'] = failed_vs_passed.apply(lambda row: sum(not row[check] for check in validation_checks.keys()), axis=1)
+failed_vs_passed['Total_Passed'] = len(validation_checks) - failed_vs_passed['Total_Failed']
+
+grouped = failed_vs_passed.groupby(timeframes[timeframe]).sum()[['Total_Failed', 'Total_Passed']].reset_index()
+
+fig_time = px.bar(grouped, x=timeframes[timeframe], y=['Total_Failed', 'Total_Passed'], barmode='stack', title=f"Failed vs Passed by {timeframe}")
+st.plotly_chart(fig_time)
+
 # Download failed data points as CSV
 st.header("Failed Data Points")
 st.dataframe(failed_data_points)
 csv = failed_data_points.to_csv(index=False)
 st.download_button(label="Download Failed Data Points as CSV", data=csv, file_name='failed_data_points.csv', mime='text/csv')
+
+# Filtered DataFrame by UPDATED_BY and counts
+st.header("Validation Counts by Uploader")
+uploader = st.selectbox('Select Uploader', df['UPDATED_BY'].unique())
+filtered_df = df[df['UPDATED_BY'] == uploader]
+
+valid_count = len(filtered_df) - filtered_df['Total_Failed'].sum()
+invalid_count = filtered_df['Total_Failed'].sum()
+
+st.write(f"Valid Items: {valid_count}")
+st.write(f"Invalid Items: {invalid_count}")
 
 # Email section
 st.sidebar.title("Send Report via Email")
@@ -261,9 +304,8 @@ if st.sidebar.button("Send Email"):
             temp_csv_path = "/tmp/failed_data_points.csv"
             with open(temp_csv_path, 'w') as f:
                 f.write(csv)
-            
+
             send_email(to_email, email_subject, email_body, temp_csv_path)
             st.sidebar.success("Email sent successfully!")
         except Exception as e:
             st.sidebar.error(f"Error sending email: {e}")
-
